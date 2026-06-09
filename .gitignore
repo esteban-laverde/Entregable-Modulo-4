@@ -1,0 +1,27 @@
+# Gradle
+.gradle/
+build/
+bin/
+
+# Java / VS Code
+.vscode/
+*.class
+
+# Python
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+
+# Playwright / Allure / Reports
+allure-results/
+reports/
+test-results/
+playwright-report/
+
+# Logs
+*.log
+
+# Archivos comprimidos
+*.zip
+*.rar

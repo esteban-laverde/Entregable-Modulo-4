@@ -1,0 +1,320 @@
+plugins {
+    id 'java'
+}
+
+group = 'com.saucedemo'
+version = '1.0.0'
+
+/*
+ * Se usa compatibilidad Java 17 sin forzar toolchain.
+ * Funciona si tienes JDK 17 o JDK 21 instalado.
+ */
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+def cucumberVersion = '7.20.1'
+def allureVersion = '2.29.1'
+def seleniumVersion = '4.25.0'
+def junitPlatformVersion = '1.11.3'
+
+def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
+def pythonCommand = isWindows ? 'python' : 'python3'
+
+dependencies {
+    testImplementation "org.seleniumhq.selenium:selenium-java:${seleniumVersion}"
+
+    testImplementation "io.cucumber:cucumber-java:${cucumberVersion}"
+    testImplementation "io.cucumber:cucumber-junit-platform-engine:${cucumberVersion}"
+
+    testImplementation "org.junit.platform:junit-platform-suite:${junitPlatformVersion}"
+    testImplementation "org.junit.jupiter:junit-jupiter-api:5.11.3"
+    testRuntimeOnly "org.junit.jupiter:junit-jupiter-engine:5.11.3"
+
+    testImplementation "io.qameta.allure:allure-cucumber7-jvm:${allureVersion}"
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+test {
+    useJUnitPlatform()
+
+    systemProperty 'headless', System.getProperty('headless', 'true')
+    systemProperty 'demoblaze.username', System.getProperty('demoblaze.username', 'estebanlav@gmail.com')
+    systemProperty 'demoblaze.password', System.getProperty('demoblaze.password', 'Test1234')
+
+    /*
+     * Carpeta donde el adapter de Allure deja los resultados.
+     * Jenkins debe publicar esta ruta:
+     * build/allure-results
+     */
+    systemProperty 'allure.results.directory', "$buildDir/allure-results"
+    systemProperty 'file.encoding', 'UTF-8'
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+    }
+
+    reports {
+        html.required = true
+        junitXml.required = true
+    }
+}
+
+tasks.register('cleanReports', Delete) {
+    group = 'verification'
+    description = 'Limpia reportes y evidencias generadas.'
+
+    delete "$buildDir/allure-results"
+    delete "$buildDir/reports/allure-report"
+    delete "$buildDir/reports/tests"
+    delete "$buildDir/reports/cucumber"
+    delete "$buildDir/test-results"
+    delete "$buildDir/evidences"
+}
+
+tasks.register('generateAllureReport', Exec) {
+    group = 'verification'
+    description = 'Genera el reporte HTML de Allure usando Allure CLI.'
+
+    workingDir projectDir
+    dependsOn test
+
+    if (isWindows) {
+        commandLine 'cmd', '/c', 'allure', 'generate', 'build/allure-results', '-o', 'build/reports/allure-report', '--clean'
+    } else {
+        commandLine 'allure', 'generate', 'build/allure-results', '-o', 'build/reports/allure-report', '--clean'
+    }
+}
+
+tasks.register('openCucumberReport') {
+    group = 'verification'
+    description = 'Ejecuta pruebas y abre el reporte HTML de Cucumber.'
+
+    dependsOn test
+
+    doLast {
+        def reportFile = file("$buildDir/reports/cucumber/cucumber.html")
+
+        if (!reportFile.exists()) {
+            throw new GradleException("No se encontró el reporte Cucumber en: ${reportFile.absolutePath}")
+        }
+
+        println "Abriendo reporte Cucumber: ${reportFile.absolutePath}"
+
+        if (isWindows) {
+            exec {
+                commandLine 'cmd', '/c', 'start', '', reportFile.absolutePath
+            }
+        } else {
+            exec {
+                commandLine 'sh', '-c', "xdg-open '${reportFile.absolutePath}' || open '${reportFile.absolutePath}' || true"
+            }
+        }
+    }
+}
+
+/*
+ * Tarea local.
+ * Ejecuta los 2 escenarios Selenium en modo headless,
+ * genera reporte Allure con Allure CLI,
+ * abre navegador y cierra el servidor temporal automáticamente después de 5 segundos.
+ */
+tasks.register('testAndOpenAllure') {
+    group = 'verification'
+    description = 'Ejecuta Selenium, genera Allure, abre navegador y cierra el servidor automáticamente.'
+
+    doLast {
+        println 'Limpiando reportes anteriores...'
+
+        delete "$buildDir/allure-results"
+        delete "$buildDir/reports/allure-report"
+        delete "$buildDir/reports/tests"
+        delete "$buildDir/reports/cucumber"
+        delete "$buildDir/test-results"
+        delete "$buildDir/evidences"
+
+        println 'Ejecutando pruebas Selenium...'
+
+        def testResult = exec {
+            workingDir projectDir
+            ignoreExitValue = true
+
+            if (isWindows) {
+                commandLine 'cmd', '/c', 'gradle', 'test', '-Dheadless=true'
+            } else {
+                commandLine 'sh', '-c', 'gradle test -Dheadless=true'
+            }
+        }
+
+        println 'Generando reporte Allure con Allure CLI...'
+
+        exec {
+            workingDir projectDir
+
+            if (isWindows) {
+                commandLine 'cmd', '/c', 'allure', 'generate', 'build/allure-results', '-o', 'build/reports/allure-report', '--clean'
+            } else {
+                commandLine 'allure', 'generate', 'build/allure-results', '-o', 'build/reports/allure-report', '--clean'
+            }
+        }
+
+        def reportDir = file("$buildDir/reports/allure-report")
+
+        if (!file("${reportDir.absolutePath}/index.html").exists()) {
+            throw new GradleException("No se encontró el index.html del reporte Allure en: ${reportDir.absolutePath}")
+        }
+
+        def port = (System.getenv('ALLURE_PORT') ?: '5051') as int
+        def seconds = 5
+        def reportUrl = "http://localhost:${port}/index.html"
+
+        println "Levantando servidor temporal para Allure en: ${reportUrl}"
+        println "Ruta del reporte: ${reportDir.absolutePath}"
+        println "El servidor se cerrará automáticamente en ${seconds} segundos."
+
+        def logFile = file("$buildDir/reports/allure-server.log")
+
+        def serverProcess = new ProcessBuilder(
+                pythonCommand,
+                '-m',
+                'http.server',
+                port.toString(),
+                '--directory',
+                reportDir.absolutePath
+        )
+                .directory(projectDir)
+                .redirectErrorStream(true)
+                .redirectOutput(logFile)
+                .start()
+
+        Thread.sleep(2000)
+
+        if (isWindows) {
+            exec {
+                commandLine 'cmd', '/c', 'start', '', reportUrl
+            }
+        } else {
+            exec {
+                commandLine 'sh', '-c', "xdg-open '${reportUrl}' || open '${reportUrl}' || true"
+            }
+        }
+
+        Thread.sleep(seconds * 1000)
+
+        println 'Cerrando servidor temporal de Allure...'
+
+        serverProcess.destroy()
+
+        if (serverProcess.isAlive()) {
+            serverProcess.destroyForcibly()
+        }
+
+        println 'Servidor Allure cerrado correctamente.'
+
+        if (testResult.exitValue != 0) {
+            throw new GradleException("Las pruebas fallaron. Se generó y abrió el reporte Allure para revisión.")
+        }
+    }
+}
+
+/*
+ * Abre un reporte Allure ya generado.
+ * No ejecuta pruebas.
+ */
+tasks.register('openAllureReport') {
+    group = 'verification'
+    description = 'Abre el reporte Allure ya generado y cierra el servidor automáticamente después de 5 segundos.'
+
+    doLast {
+        def reportDir = file("$buildDir/reports/allure-report")
+
+        if (!file("${reportDir.absolutePath}/index.html").exists()) {
+            throw new GradleException("No se encontró el reporte Allure. Primero ejecuta: gradle testAndOpenAllure")
+        }
+
+        def port = (System.getenv('ALLURE_PORT') ?: '5051') as int
+        def seconds = 5
+        def reportUrl = "http://localhost:${port}/index.html"
+
+        println "Levantando servidor temporal para Allure en: ${reportUrl}"
+        println "Ruta del reporte: ${reportDir.absolutePath}"
+        println "El servidor se cerrará automáticamente en ${seconds} segundos."
+
+        def logFile = file("$buildDir/reports/allure-server.log")
+
+        def serverProcess = new ProcessBuilder(
+                pythonCommand,
+                '-m',
+                'http.server',
+                port.toString(),
+                '--directory',
+                reportDir.absolutePath
+        )
+                .directory(projectDir)
+                .redirectErrorStream(true)
+                .redirectOutput(logFile)
+                .start()
+
+        Thread.sleep(2000)
+
+        if (isWindows) {
+            exec {
+                commandLine 'cmd', '/c', 'start', '', reportUrl
+            }
+        } else {
+            exec {
+                commandLine 'sh', '-c', "xdg-open '${reportUrl}' || open '${reportUrl}' || true"
+            }
+        }
+
+        Thread.sleep(seconds * 1000)
+
+        println 'Cerrando servidor temporal de Allure...'
+
+        serverProcess.destroy()
+
+        if (serverProcess.isAlive()) {
+            serverProcess.destroyForcibly()
+        }
+
+        println 'Servidor Allure cerrado correctamente.'
+    }
+}
+
+/*
+ * Tarea para Jenkins.
+ * Ejecuta los 2 escenarios BDD de Selenium en modo headless.
+ *
+ * Genera:
+ * - JUnit XML: build/test-results/test/*.xml
+ * - Reporte HTML Gradle: build/reports/tests/test/index.html
+ * - Reporte Cucumber: build/reports/cucumber/cucumber.html
+ * - Resultados Allure: build/allure-results
+ * - Screenshots en fallos, si aplica: build/evidences/screenshots
+ *
+ * Esta tarea NO abre navegador y NO levanta servidor.
+ */
+tasks.register('testJenkins') {
+    group = 'verification'
+    description = 'Ejecuta los 2 escenarios BDD Selenium en modo headless para Jenkins.'
+
+    dependsOn cleanReports, test
+}
+
+test.mustRunAfter cleanReports
+
+tasks.register('testLocal') {
+    group = 'verification'
+    description = 'Ejecuta los 2 escenarios BDD Selenium en modo headless sin abrir reportes.'
+
+    dependsOn cleanReports, test
+}

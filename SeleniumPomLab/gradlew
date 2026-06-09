@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+if ! command -v gradle >/dev/null 2>&1; then
+  echo "ERROR: Gradle no está instalado o no está en el PATH."
+  echo "Instala Gradle o ejecuta el wrapper oficial con: gradle wrapper"
+  exit 1
+fi
+gradle "$@"
