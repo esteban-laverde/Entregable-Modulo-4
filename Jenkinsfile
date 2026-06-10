@@ -8,6 +8,30 @@ pipeline {
             }
         }
 
+        stage('Mostrar código de los stages') {
+            steps {
+                echo 'Mostrando el código de los stages principales del Jenkinsfile.'
+
+                script {
+                    if (isUnix()) {
+                        sh '''
+                            echo "==================== STAGE 1: SELENIUM JAVA ===================="
+                            sed -n "/stage('Selenium Java - BDD Demoblaze')/,/stage('Playwright Python - BDD Demoblaze')/p" Jenkinsfile
+
+                            echo "==================== STAGE 2: PLAYWRIGHT PYTHON ===================="
+                            sed -n "/stage('Playwright Python - BDD Demoblaze')/,/post {/p" Jenkinsfile
+                        '''
+                    } else {
+                        powershell '''
+                            Write-Host "==================== INICIO JENKINSFILE ===================="
+                            Get-Content .\\Jenkinsfile
+                            Write-Host "==================== FIN JENKINSFILE ===================="
+                        '''
+                    }
+                }
+            }
+        }
+
         stage('Selenium Java - BDD Demoblaze') {
             steps {
                 dir('SeleniumPomLab') {
@@ -15,6 +39,10 @@ pipeline {
                         if (isUnix()) {
                             sh '''
                                 set -e
+
+                                echo "Ejecutando Stage Selenium Java - BDD Demoblaze"
+                                echo "Este stage ejecuta los 2 escenarios BDD de Selenium."
+
                                 if [ -f "./gradlew" ]; then
                                     chmod +x ./gradlew || true
                                     ./gradlew testJenkins -Dheadless=true
@@ -24,6 +52,9 @@ pipeline {
                             '''
                         } else {
                             powershell '''
+                                Write-Host "Ejecutando Stage Selenium Java - BDD Demoblaze"
+                                Write-Host "Este stage ejecuta los 2 escenarios BDD de Selenium."
+
                                 if (Test-Path ".\\gradlew.bat") {
                                     .\\gradlew.bat testJenkins -Dheadless=true
                                 } else {
@@ -34,6 +65,7 @@ pipeline {
                     }
                 }
             }
+
             post {
                 always {
                     junit allowEmptyResults: true, testResults: 'SeleniumPomLab/build/test-results/test/*.xml'
@@ -45,11 +77,17 @@ pipeline {
                         SeleniumPomLab/build/evidences/screenshots/**
                     '''
 
-                    allure([
-                        includeProperties: false,
-                        jdk: '',
-                        results: [[path: 'SeleniumPomLab/build/allure-results']]
-                    ])
+                    script {
+                        try {
+                            allure([
+                                includeProperties: false,
+                                jdk: '',
+                                results: [[path: 'SeleniumPomLab/build/allure-results']]
+                            ])
+                        } catch (Exception e) {
+                            echo "No fue posible publicar Allure desde Jenkins. Verifica si el plugin Allure está instalado. Los resultados quedaron archivados como artefactos."
+                        }
+                    }
                 }
             }
         }
@@ -61,6 +99,10 @@ pipeline {
                         if (isUnix()) {
                             sh '''
                                 set -e
+
+                                echo "Ejecutando Stage Playwright Python - BDD Demoblaze"
+                                echo "Este stage ejecuta solo 1 escenario BDD de Playwright."
+
                                 python3 -m venv .venv
                                 . .venv/bin/activate
                                 python -m pip install --upgrade pip
@@ -79,6 +121,9 @@ pipeline {
                             '''
                         } else {
                             powershell '''
+                                Write-Host "Ejecutando Stage Playwright Python - BDD Demoblaze"
+                                Write-Host "Este stage ejecuta solo 1 escenario BDD de Playwright."
+
                                 py -3.12 -m venv .venv
                                 .\\.venv\\Scripts\\Activate.ps1
                                 python -m pip install --upgrade pip
@@ -98,6 +143,7 @@ pipeline {
                     }
                 }
             }
+
             post {
                 always {
                     junit allowEmptyResults: true, testResults: 'PlaywrightPomLab/reports/junit/*.xml'
@@ -107,11 +153,17 @@ pipeline {
                         PlaywrightPomLab/allure-results/**
                     '''
 
-                    allure([
-                        includeProperties: false,
-                        jdk: '',
-                        results: [[path: 'PlaywrightPomLab/allure-results']]
-                    ])
+                    script {
+                        try {
+                            allure([
+                                includeProperties: false,
+                                jdk: '',
+                                results: [[path: 'PlaywrightPomLab/allure-results']]
+                            ])
+                        } catch (Exception e) {
+                            echo "No fue posible publicar Allure desde Jenkins. Verifica si el plugin Allure está instalado. Los resultados quedaron archivados como artefactos."
+                        }
+                    }
                 }
             }
         }
@@ -119,7 +171,7 @@ pipeline {
 
     post {
         always {
-            echo 'Pipeline finalizado. Revisa JUnit, artefactos archivados y Allure Report en Jenkins.'
+            echo 'Pipeline finalizado. Revisa JUnit, artefactos archivados y Allure Report en Jenkins si el plugin está instalado.'
         }
     }
 }
