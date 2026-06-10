@@ -6,26 +6,46 @@ def isWindows = System.getProperty('os.name').toLowerCase().contains('windows')
 def pythonCommand = isWindows ? 'python' : 'python3'
 
 tasks.register('cleanReports', Delete) {
+    group = 'verification'
+    description = 'Limpia reportes y resultados anteriores.'
+
     delete 'allure-results'
     delete 'reports'
 }
 
 tasks.register('installRequirements', Exec) {
+    group = 'verification'
+    description = 'Instala dependencias Python desde requirements.txt.'
+
     workingDir projectDir
-    commandLine pythonCommand, '-m', 'pip', 'install', '-r', 'requirements.txt'
+
+    if (isWindows) {
+        commandLine pythonCommand, '-m', 'pip', 'install', '-r', 'requirements.txt'
+    } else {
+        commandLine pythonCommand, '-m', 'pip', 'install', '-r', 'requirements.txt'
+    }
 }
 
 tasks.register('installBrowsers', Exec) {
+    group = 'verification'
+    description = 'Instala navegador Chromium requerido por Playwright.'
+
     workingDir projectDir
-    commandLine pythonCommand, '-m', 'playwright', 'install', 'chromium'
+    dependsOn installRequirements
+
+    if (isWindows) {
+        commandLine pythonCommand, '-m', 'playwright', 'install', 'chromium'
+    } else {
+        commandLine pythonCommand, '-m', 'playwright', 'install', 'chromium'
+    }
 }
 
 tasks.register('testPlaywright', Exec) {
     group = 'verification'
-    description = 'Ejecuta las pruebas Playwright en modo headless.'
+    description = 'Ejecuta pruebas Playwright en modo headless.'
 
     workingDir projectDir
-    dependsOn installRequirements, installBrowsers
+    dependsOn installBrowsers
 
     doFirst {
         mkdir 'reports/junit'
@@ -36,7 +56,7 @@ tasks.register('testPlaywright', Exec) {
 
 tasks.register('allureReportLocal', Exec) {
     group = 'verification'
-    description = 'Ejecuta pruebas Playwright y genera el reporte HTML de Allure.'
+    description = 'Genera reporte HTML de Allure usando Allure CLI.'
 
     workingDir projectDir
     dependsOn testPlaywright
@@ -52,7 +72,7 @@ tasks.register('testAndOpenAllure') {
     group = 'verification'
     description = 'Ejecuta pruebas Playwright, genera reporte Allure, abre navegador y cierra el servidor automáticamente.'
 
-    dependsOn installRequirements, installBrowsers
+    dependsOn installBrowsers
 
     doLast {
         mkdir 'reports/junit'
@@ -137,7 +157,7 @@ tasks.register('testAndOpenAllure') {
 
 tasks.register('openAllureReport') {
     group = 'verification'
-    description = 'Levanta el reporte Allure previamente generado y cierra el servidor automáticamente después de 5 segundos.'
+    description = 'Abre el reporte Allure previamente generado y cierra el servidor automáticamente después de 5 segundos.'
 
     doLast {
         def reportDir = file('reports/allure-report')
@@ -196,16 +216,16 @@ tasks.register('openAllureReport') {
 
 /*
  * Tarea para Jenkins.
- * Ejecuta las pruebas en modo headless y genera:
- * - reports/junit/playwright-results.xml
- * - allure-results/
- * - reports/pytest-report.html
+ * Ejecuta Playwright en modo headless.
  *
- * Esta tarea NO abre navegador y NO levanta servidor.
+ * Jenkins define:
+ * PYTEST_ADDOPTS="-m carrito"
+ *
+ * Por eso se ejecuta solo 1 escenario BDD.
  */
 tasks.register('testJenkins') {
     group = 'verification'
-    description = 'Ejecuta pruebas Playwright en modo headless para Jenkins y deja resultados JUnit y Allure.'
+    description = 'Ejecuta pruebas Playwright en Jenkins y deja resultados JUnit y Allure.'
 
     dependsOn cleanReports, testPlaywright
 }
